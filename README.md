@@ -1,5 +1,7 @@
 # swc-remove-invalid-content-plugin
 
+[![Node.js Package](https://github.com/Justinidlerz/swc-remove-invalid-content-plugin/actions/workflows/npm-publish.yml/badge.svg)](https://github.com/Justinidlerz/swc-remove-invalid-content-plugin/actions/workflows/npm-publish.yml)
+
 This is only for swc javascript API plugin.  
 It can help you to remove invalid content via regexp rules from string literal of your code.
 
