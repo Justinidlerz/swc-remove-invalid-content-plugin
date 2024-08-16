@@ -10,7 +10,8 @@
   "main": "target/wasm32-wasi/release/swc_remove_invalid_content_plugin.wasm",
   "scripts": {
     "build": "cargo build-wasi --release",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "test": "vitest run"
   },
   "files": [
     "target",
