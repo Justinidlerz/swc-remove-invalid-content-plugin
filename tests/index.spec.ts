@@ -3,11 +3,11 @@ import * as swc from '@swc/core';
 import * as path from 'node:path';
 import pkg from '../package.json';
 
-const createTransform = async (content: string, matches: string[]) => {
+const createTransform = async (content: string, matches: string[], replace_with?: string) => {
   const res = await swc.transform(content, {
     filename: 'input.js',
     sourceMaps: false,
-    isModule: false,
+    isModule: true,
     jsc: {
       parser: {
         syntax: 'ecmascript',
@@ -19,6 +19,7 @@ const createTransform = async (content: string, matches: string[]) => {
             require.resolve(path.join(__dirname, '../', pkg.main)),
             {
               matches,
+              replace_with
             },
           ],
         ],
@@ -105,6 +106,28 @@ describe('swc-remove-invalid-content-plugin', () => {
               "": "https:///"
           }, "", "https:///abc")
       };
+      "
+    `);
+  });
+
+  it('Should not remove from import syntax', async () => {
+    const code = await createTransform('import * as A from "/中文中文"', [
+      '[\u4E00-\u9FFF]',
+    ]);
+
+    expect(code).toMatchInlineSnapshot(`
+      "import * as A from "/中文中文";
+      "
+    `);
+  });
+
+  it('Should replace with by passed char', async () => {
+    const code = await createTransform('console.log("https://www.google.com/url")', [
+      'google.com',
+    ], "*");
+
+    expect(code).toMatchInlineSnapshot(`
+      "console.log("https://www.**********/url");
       "
     `);
   });

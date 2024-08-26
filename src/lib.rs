@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+use std::default::Default;
 use swc_core::ecma::{
     ast::Program,
     ast::{Str},
@@ -8,34 +10,71 @@ use swc_core::plugin::{plugin_transform, proxies::TransformPluginProgramMetadata
 use regex::Regex;
 use serde::Deserialize;
 use serde_json::from_str;
+use swc_core::atoms::Atom;
+use swc_core::common::DUMMY_SP;
+use swc_core::ecma::ast::{ImportDecl, TplElement};
 
-#[derive(Default, Deserialize)]
+#[derive(Deserialize, Default)]
 struct Config {
+    replace_with: Option<String>,
     matches: Vec<String>,
 }
 
 struct RemoveInvalidContent {
     matchers: Vec<Regex>,
+    replace_with: String,
 }
 
 impl RemoveInvalidContent {
     fn new(config: Config) -> RemoveInvalidContent {
         Self {
             matchers: config.matches.iter().map(|x| Regex::new(x.as_str()).unwrap()).collect(),
+            replace_with: config.replace_with.unwrap_or("".to_string()),
         }
+    }
+
+    fn replace_with<'h>(&self, matcher: &Regex, str: &'h str) -> Cow<'h, str> {
+        matcher.replace_all(str, |caps: &regex::Captures| {
+            if self.replace_with.is_empty() {
+                return "".to_string()
+            }
+
+            let matched_str = &caps[0];
+            self.replace_with.repeat(matched_str.len())
+        })
     }
 }
 
+
 impl VisitMut for RemoveInvalidContent {
+    fn visit_mut_import_decl(&mut self, _: &mut ImportDecl) {
+        // Do nothing due to import path should not be transformed and it will be minified
+    }
+
     fn visit_mut_str(&mut self, node: &mut Str) {
         for matcher in self.matchers.iter() {
-            let new_value = matcher.replace_all(&node.value, "");
+            let new_value =self.replace_with(matcher, node.value.as_str());
 
-            let new_node = Str::from(new_value);
+            let new_content = new_value.to_string();
 
-            node.clone_from(&new_node);
+            node.clone_from(&Str::from(new_content))
         }
+        node.visit_mut_children_with(self);
+    }
 
+    fn visit_mut_tpl_element(&mut self, node: &mut TplElement) {
+        for matcher in self.matchers.iter() {
+            let new_value = self.replace_with(matcher, node.raw.as_str());
+
+            let tpl_element = TplElement {
+                span: DUMMY_SP,
+                tail: false,
+                cooked: Some(Atom::from(new_value.to_string())),
+                raw: Atom::from(new_value.to_string()),
+            };
+
+            node.clone_from(&tpl_element)
+        }
         node.visit_mut_children_with(self);
     }
 }
@@ -60,7 +99,8 @@ pub fn process_transform(mut program: Program, data: TransformPluginProgramMetad
 test_inline!(
     Default::default(),
     |_| as_folder(RemoveInvalidContent::new(Config{
-        matches: vec![r"[\u4E00-\u9FFF]".to_string()]
+        matches: vec![r"[\u4E00-\u9FFF]".to_string()],
+        ..Default::default()
     })),
     should_not_change,
     r#"console.log("transform");"#,
@@ -70,7 +110,8 @@ test_inline!(
 test_inline!(
     Default::default(),
     |_| as_folder(RemoveInvalidContent::new(Config{
-        matches: vec![r"[\u4E00-\u9FFF]".to_string()]
+        matches: vec![r"[\u4E00-\u9FFF]".to_string()],
+        ..Default::default()
     })),
     should_remove_in_method_calls,
     r#"console.log("transform中文");"#,
@@ -81,7 +122,8 @@ test_inline!(
     Default::default(),
     |_| as_folder(RemoveInvalidContent::new(
         Config{
-        matches: vec![r"[\u4E00-\u9FFF]".to_string()]
+        matches: vec![r"[\u4E00-\u9FFF]".to_string()],
+        ..Default::default()
     }
     )),
     should_remove_in_object_property,
@@ -106,7 +148,8 @@ test_inline!(
     Default::default(),
     |_| as_folder(RemoveInvalidContent::new(
         Config{
-        matches: vec![r"[\u4E00-\u9FFF]".to_string()]
+        matches: vec![r"[\u4E00-\u9FFF]".to_string()],
+        ..Default::default()
     }
     )),
     should_left_english_and_special_characters,
@@ -130,9 +173,43 @@ test_inline!(
 test_inline!(
     Default::default(),
     |_| as_folder(RemoveInvalidContent::new(Config{
-        matches: vec![r"abc.com|cde.org".to_string()]
+        matches: vec![r"abc.com|cde.org".to_string()],
+        ..Default::default()
     })),
     should_remove_url,
     r#"console.log("https://abc.com/faker-url");"#,
     r#"console.log("https:///faker-url");"#
+);
+
+test_inline!(
+    Default::default(),
+    |_| as_folder(RemoveInvalidContent::new(Config{
+        matches: vec![r"abc.com|cde.org".to_string()],
+        ..Default::default()
+    })),
+    should_remove_from_tpl,
+    r#"console.log(`https://abc.com/faker-url/${window.location.href}`);"#,
+    r#"console.log(`https:///faker-url/${window.location.href}`);"#
+);
+
+test_inline!(
+    Default::default(),
+    |_| as_folder(RemoveInvalidContent::new(Config{
+        matches: vec![r"abc.com|cde.org".to_string()],
+        ..Default::default()
+    })),
+    should_not_remove_from_import,
+    r#"import * as A from "/abc.com/faker-url";"#,
+    r#"import * as A from "/abc.com/faker-url";"#
+);
+
+test_inline!(
+    Default::default(),
+    |_| as_folder(RemoveInvalidContent::new(Config{
+        matches: vec![r"abc.com|cde.org".to_string()],
+        replace_with: Some(String::from("*"))
+    })),
+    should_replace_as_passed_char,
+    r#"console.log("https://abc.com/faker-url");"#,
+    r#"console.log("https://*******/faker-url");"#
 );
