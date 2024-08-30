@@ -12,7 +12,7 @@ use serde::Deserialize;
 use serde_json::from_str;
 use swc_core::atoms::Atom;
 use swc_core::common::DUMMY_SP;
-use swc_core::ecma::ast::{ImportDecl, TplElement};
+use swc_core::ecma::ast::{CallExpr, ExportAll, ExportDecl, ExportDefaultDecl, FnExpr, Import, ImportDecl, ImportSpecifier, NamedExport, TplElement};
 
 #[derive(Deserialize, Default)]
 struct Config {
@@ -36,7 +36,7 @@ impl RemoveInvalidContent {
     fn replace_with<'h>(&self, matcher: &Regex, str: &'h str) -> Cow<'h, str> {
         matcher.replace_all(str, |caps: &regex::Captures| {
             if self.replace_with.is_empty() {
-                return "".to_string()
+                return "".to_string();
             }
 
             let matched_str = &caps[0];
@@ -47,13 +47,22 @@ impl RemoveInvalidContent {
 
 
 impl VisitMut for RemoveInvalidContent {
-    fn visit_mut_import_decl(&mut self, _: &mut ImportDecl) {
-        // Do nothing due to import path should not be transformed and it will be minified
+    fn visit_mut_export_all(&mut self, _: &mut ExportAll) {}
+    fn visit_mut_named_export(&mut self, _: &mut NamedExport) {}
+    fn visit_mut_export_default_decl(&mut self, _: &mut ExportDefaultDecl) {}
+    fn visit_mut_import(&mut self, _: &mut Import) {}
+    fn visit_mut_import_decl(&mut self, _: &mut ImportDecl) {}
+    fn visit_mut_import_specifier(&mut self, _: &mut ImportSpecifier) {}
+
+    fn visit_mut_call_expr(&mut self, node: &mut CallExpr) {
+        if !node.callee.is_import() {
+            node.visit_mut_children_with(self);
+        }
     }
 
     fn visit_mut_str(&mut self, node: &mut Str) {
         for matcher in self.matchers.iter() {
-            let new_value =self.replace_with(matcher, node.value.as_str());
+            let new_value = self.replace_with(matcher, node.value.as_str());
 
             let new_content = new_value.to_string();
 
@@ -198,9 +207,87 @@ test_inline!(
         matches: vec![r"abc.com|cde.org".to_string()],
         ..Default::default()
     })),
-    should_not_remove_from_import,
+    should_not_remove_from_import_all,
     r#"import * as A from "/abc.com/faker-url";"#,
     r#"import * as A from "/abc.com/faker-url";"#
+);
+
+test_inline!(
+    Default::default(),
+    |_| as_folder(RemoveInvalidContent::new(Config{
+        matches: vec![r"abc.com|cde.org".to_string()],
+        ..Default::default()
+    })),
+    should_not_remove_from_import_only,
+    r#"import "/abc.com/faker-url";"#,
+    r#"import "/abc.com/faker-url";"#
+);
+
+test_inline!(
+    Default::default(),
+    |_| as_folder(RemoveInvalidContent::new(Config{
+        matches: vec![r"abc.com|cde.org".to_string()],
+        ..Default::default()
+    })),
+    should_not_remove_from_default_import,
+    r#"import abc from "/abc.com/faker-url";"#,
+    r#"import abc from "/abc.com/faker-url";"#
+);
+
+
+test_inline!(
+    Default::default(),
+    |_| as_folder(RemoveInvalidContent::new(Config{
+        matches: vec![r"abc.com|cde.org".to_string()],
+        ..Default::default()
+    })),
+    should_not_remove_from_named_import,
+    r#"import { efg } from "/abc.com/faker-url";"#,
+    r#"import { efg } from "/abc.com/faker-url";"#
+);
+
+test_inline!(
+    Default::default(),
+    |_| as_folder(RemoveInvalidContent::new(Config{
+        matches: vec![r"abc.com|cde.org".to_string()],
+        ..Default::default()
+    })),
+    should_not_remove_from_dynamic_import,
+    r#"import("/abc.com/faker-url");"#,
+    r#"import("/abc.com/faker-url");"#
+);
+
+test_inline!(
+    Default::default(),
+    |_| as_folder(RemoveInvalidContent::new(Config{
+        matches: vec![r"abc.com|cde.org".to_string()],
+        ..Default::default()
+    })),
+    should_not_remove_from_all_export,
+    r#"export * from "/abc.com/faker-url";"#,
+    r#"export * from "/abc.com/faker-url";"#
+);
+
+test_inline!(
+    Default::default(),
+    |_| as_folder(RemoveInvalidContent::new(Config{
+        matches: vec![r"abc.com|cde.org".to_string()],
+        ..Default::default()
+    })),
+    should_not_remove_from_all_export_with_rename,
+    r#"export * as a from "/abc.com/faker-url";"#,
+    r#"export * as a from "/abc.com/faker-url";"#
+);
+
+test_inline!(
+    Default::default(),
+    |_| as_folder(RemoveInvalidContent::new(Config{
+        matches: vec![r"abc.com|cde.org".to_string()],
+        ..Default::default()
+    })),
+    should_not_remove_from_named_export,
+    r#"export { cde } from "/abc.com/faker-url";"#,
+    r#"export { cde } from "/abc.com/faker-url";"#
 );
 
 test_inline!(
