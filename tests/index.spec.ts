@@ -2,8 +2,15 @@ import { describe, expect, it } from 'vitest';
 import * as swc from '@swc/core';
 import * as path from 'node:path';
 import pkg from '../package.json';
+import * as fs from 'node:fs';
+import { Options } from '@swc/core';
 
-const createTransform = async (content: string, matches: string[], replace_with?: string) => {
+const createTransform = async (
+  content: string,
+  matches: string[],
+  replace_with?: string,
+  options?: Options,
+) => {
   const res = await swc.transform(content, {
     filename: 'input.js',
     sourceMaps: false,
@@ -11,6 +18,7 @@ const createTransform = async (content: string, matches: string[], replace_with?
     jsc: {
       parser: {
         syntax: 'ecmascript',
+        jsx: true,
       },
       transform: {},
       experimental: {
@@ -19,12 +27,13 @@ const createTransform = async (content: string, matches: string[], replace_with?
             require.resolve(path.join(__dirname, '../', pkg.main)),
             {
               matches,
-              replace_with
+              replace_with,
             },
           ],
         ],
       },
     },
+    ...options,
   });
 
   return res.code;
@@ -122,13 +131,67 @@ describe('swc-remove-invalid-content-plugin', () => {
   });
 
   it('Should replace with by passed char', async () => {
-    const code = await createTransform('console.log("https://www.google.com/url")', [
-      'google.com',
-    ], "*");
+    const code = await createTransform(
+      'console.log("https://www.google.com/url")',
+      ['google.com'],
+      '*',
+    );
 
     expect(code).toMatchInlineSnapshot(`
       "console.log("https://www.**********/url");
       "
     `);
+  });
+
+  it('Should not remove slack', async () => {
+    const code = await createTransform('new RegExp("\\\\")', [
+      '[\u4E00-\u9FFF]',
+    ]);
+
+    expect(code).toMatchInlineSnapshot(`
+      "new RegExp("\\\\");
+      "
+    `);
+  });
+
+  it('Should not remove slack from tpl', async () => {
+    const code = await createTransform('new RegExp(`\\中文${b}`)', [
+      '[\u4E00-\u9FFF]',
+    ]);
+
+    expect(code).toMatchInlineSnapshot(`
+      "new RegExp("\\\\".concat(b));
+      "
+    `);
+  });
+
+  it('Should not transform code when not match', async () => {
+    const code = await createTransform(
+      fs.readFileSync(path.join(__dirname, './test.js'), 'utf-8'),
+      ['[一-鿿]'],
+    );
+
+    expect(code).toMatchFileSnapshot(path.join(__dirname, './transformed.js'));
+  });
+
+  it('Should not transform code when not match', async () => {
+    const code = await createTransform(
+      fs.readFileSync(path.join(__dirname, './test.js'), 'utf-8'),
+      ['[一-鿿]'],
+      '',
+      {
+        env: {
+          targets: [
+            'chrome >= 87',
+            'edge >= 88',
+            'firefox >= 78',
+            'safari >= 14',
+          ],
+          mode: undefined,
+        },
+      },
+    );
+
+    expect(code).toMatchFileSnapshot(path.join(__dirname, './transformed-es.js'));
   });
 });
