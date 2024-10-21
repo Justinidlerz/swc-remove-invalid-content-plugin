@@ -9,3 +9,4 @@ const parsePriceWording = (priceValue) => {
 
   return parsedText;
 };
+
