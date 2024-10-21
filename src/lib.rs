@@ -66,9 +66,7 @@ impl VisitMut for RemoveInvalidContent {
     fn visit_mut_str(&mut self, node: &mut Str) {
         for matcher in self.matchers.iter() {
             if let Ok(new_value) = self.replace_with(matcher, node.value.as_str()) {
-                let new_content = new_value.to_string();
-
-                node.clone_from(&Str::from(new_content))
+                node.clone_from(&Str::from(new_value.to_string()))
             }
         }
         node.visit_mut_children_with(self);
@@ -76,14 +74,17 @@ impl VisitMut for RemoveInvalidContent {
 
     fn visit_mut_tpl_element(&mut self, node: &mut TplElement) {
         for matcher in self.matchers.iter() {
-            if let Ok(new_value) = self.replace_with(matcher, node.raw.as_str()) {
-                let new_atom = Atom::from(new_value.to_string());
+            if let (Ok(cooked_value), Ok(raw_value)) = (
+                self.replace_with(matcher, node.cooked.clone().unwrap().as_str()), self.replace_with(matcher, node.raw.as_str())) {
+
+                let cooked_value = cooked_value.clone().into();
+                let new_atom = Atom::from(raw_value);
 
                 let tpl_element = TplElement {
                     span: node.span,
                     tail: node.tail,
-                    cooked: Some(new_atom.clone()),
                     raw: new_atom,
+                    cooked: Some(cooked_value),
                 };
 
                 node.clone_from(&tpl_element)
