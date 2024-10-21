@@ -155,7 +155,8 @@ describe('swc-remove-invalid-content-plugin', () => {
   });
 
   it('Should not remove slack from tpl', async () => {
-    const code = await createTransform('new RegExp(`\\中文${b}`)', [
+    const a = 'new RegExp(`\\\\中文${b}`)'
+    const code = await createTransform(a, [
       '[\u4E00-\u9FFF]',
     ]);
 
