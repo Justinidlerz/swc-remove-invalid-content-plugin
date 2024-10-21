@@ -11,8 +11,7 @@ use regex::Regex;
 use serde::Deserialize;
 use serde_json::from_str;
 use swc_core::atoms::Atom;
-use swc_core::common::DUMMY_SP;
-use swc_core::ecma::ast::{CallExpr, ExportAll, ExportDecl, ExportDefaultDecl, FnExpr, Import, ImportDecl, ImportSpecifier, NamedExport, TplElement};
+use swc_core::ecma::ast::{CallExpr, ExportAll, ExportDefaultDecl, Import, ImportDecl, ImportSpecifier, NamedExport, TplElement};
 
 #[derive(Deserialize, Default)]
 struct Config {
@@ -33,15 +32,19 @@ impl RemoveInvalidContent {
         }
     }
 
-    fn replace_with<'h>(&self, matcher: &Regex, str: &'h str) -> Cow<'h, str> {
-        matcher.replace_all(str, |caps: &regex::Captures| {
+    fn replace_with<'h>(&self, matcher: &Regex, str: &'h str) -> Result<Cow<'h, str>, bool> {
+        if !matcher.is_match(str) {
+            return Err(false);
+        }
+
+        Ok(matcher.replace_all(str, |caps: &regex::Captures| {
             if self.replace_with.is_empty() {
                 return "".to_string();
             }
 
             let matched_str = &caps[0];
             self.replace_with.repeat(matched_str.len())
-        })
+        }))
     }
 }
 
@@ -62,27 +65,29 @@ impl VisitMut for RemoveInvalidContent {
 
     fn visit_mut_str(&mut self, node: &mut Str) {
         for matcher in self.matchers.iter() {
-            let new_value = self.replace_with(matcher, node.value.as_str());
+            if let Ok(new_value) = self.replace_with(matcher, node.value.as_str()) {
+                let new_content = new_value.to_string();
 
-            let new_content = new_value.to_string();
-
-            node.clone_from(&Str::from(new_content))
+                node.clone_from(&Str::from(new_content))
+            }
         }
         node.visit_mut_children_with(self);
     }
 
     fn visit_mut_tpl_element(&mut self, node: &mut TplElement) {
         for matcher in self.matchers.iter() {
-            let new_value = self.replace_with(matcher, node.raw.as_str());
+            if let Ok(new_value) = self.replace_with(matcher, node.raw.as_str()) {
+                let new_atom = Atom::from(new_value.to_string());
 
-            let tpl_element = TplElement {
-                span: DUMMY_SP,
-                tail: false,
-                cooked: Some(Atom::from(new_value.to_string())),
-                raw: Atom::from(new_value.to_string()),
-            };
+                let tpl_element = TplElement {
+                    span: node.span,
+                    tail: node.tail,
+                    cooked: Some(new_atom.clone()),
+                    raw: new_atom,
+                };
 
-            node.clone_from(&tpl_element)
+                node.clone_from(&tpl_element)
+            }
         }
         node.visit_mut_children_with(self);
     }
@@ -189,6 +194,45 @@ test_inline!(
     r#"console.log("https://abc.com/faker-url");"#,
     r#"console.log("https:///faker-url");"#
 );
+
+test_inline!(
+    Default::default(),
+    |_| as_folder(RemoveInvalidContent::new(
+        Config{
+        matches: vec![r"[\u4E00-\u9FFF]".to_string()],
+        ..Default::default()
+    }
+    )),
+    should_not_remove_slack,
+    r#"const a = {
+      cde: {
+        code: 1,
+        message: "\\\\",
+      }
+     }"#,
+    r#"const a = {
+      cde: {
+        code: 1,
+        message: "\\\\",
+      }
+     }"#
+);
+
+
+test_inline!(
+    Default::default(),
+    |_| as_folder(RemoveInvalidContent::new(
+        Config{
+        matches: vec![r"[\u4E00-\u9FFF]".to_string()],
+        ..Default::default()
+    }
+    )),
+    should_not_remove_slack_from_tpl,
+    r#"const a = `\\中文${b}`"#,
+    r#"const a = `\\${b}`"#
+);
+
+
 
 test_inline!(
     Default::default(),
