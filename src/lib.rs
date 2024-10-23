@@ -11,7 +11,8 @@ use regex::Regex;
 use serde::Deserialize;
 use serde_json::from_str;
 use swc_core::atoms::Atom;
-use swc_core::ecma::ast::{CallExpr, ExportAll, ExportDefaultDecl, Import, ImportDecl, ImportSpecifier, NamedExport, TplElement};
+use swc_core::ecma::ast::{CallExpr, ExportAll, ExportDefaultDecl, Import, ImportDecl, ImportSpecifier, JSXText, NamedExport, TplElement};
+use swc_ecma_parser::{EsSyntax, Syntax};
 
 #[derive(Deserialize, Default)]
 struct Config {
@@ -61,6 +62,18 @@ impl VisitMut for RemoveInvalidContent {
         if !node.callee.is_import() {
             node.visit_mut_children_with(self);
         }
+    }
+
+    fn visit_mut_jsx_text(&mut self, node: &mut JSXText) {
+        for matcher in self.matchers.iter() {
+            if let Ok(new_value) = self.replace_with(matcher, node.raw.as_str()) {
+                let new_atom = Atom::from(new_value);
+                node.raw.clone_from(&new_atom);
+                node.value.clone_from(&new_atom);
+            }
+        }
+
+        node.visit_mut_children_with(self);
     }
 
     fn visit_mut_str(&mut self, node: &mut Str) {
@@ -231,6 +244,56 @@ test_inline!(
     r#"const a = `\\${b}`"#
 );
 
+test_inline!(
+    Syntax::Es(EsSyntax {
+        jsx: true,
+        ..Default::default()
+    }),
+    |_| as_folder(RemoveInvalidContent::new(
+        Config{
+        matches: vec![r"[\u4E00-\u9FFF]".to_string()],
+        ..Default::default()
+    }
+    )),
+    should_remove_chinese_on_jsx,
+    r#"const a = () => {
+        return <div>关闭
+            <p>打开</p>
+        </div>
+    }
+    "#,
+    r#"const a = () => {
+        return <div>
+            <p></p>
+        </div>
+    }"#
+);
+
+
+test_inline!(
+    Syntax::Es(EsSyntax {
+        jsx: true,
+        ..Default::default()
+    }),
+    |_| as_folder(RemoveInvalidContent::new(
+        Config{
+        matches: vec![r"[\u4E00-\u9FFF]".to_string()],
+        ..Default::default()
+    }
+    )),
+    should_remove_chinese_on_jsx_attr,
+    r#"const a = () => {
+        return <div data-info="中文">
+            <p>node</p>
+        </div>
+    }
+    "#,
+    r#"const a = () => {
+        return <div data-info="">
+            <p>node</p>
+        </div>
+    }"#
+);
 
 
 test_inline!(
@@ -343,3 +406,5 @@ test_inline!(
     r#"console.log("https://abc.com/faker-url");"#,
     r#"console.log("https://*******/faker-url");"#
 );
+
+

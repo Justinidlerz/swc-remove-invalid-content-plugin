@@ -195,4 +195,40 @@ describe('swc-remove-invalid-content-plugin', () => {
 
     expect(code).toMatchFileSnapshot(path.join(__dirname, './transformed-es.js'));
   });
+
+  it('Should remove chinese in jsx', async() => {
+    const app = `
+      const app = () => {
+        return (
+          <div>
+            中文中文
+            <p>english</p>
+          </div>
+        )
+      } 
+    `
+    const code = await createTransform(
+        app,
+        ['[一-鿿]'],
+        '',
+        {
+          env: {
+            targets: [
+              'chrome >= 87',
+              'edge >= 88',
+              'firefox >= 78',
+              'safari >= 14',
+            ],
+            mode: undefined,
+          },
+        },
+    );
+
+    expect(code).toMatchInlineSnapshot(`
+      "const app = ()=>{
+          return /*#__PURE__*/ React.createElement("div", null, /*#__PURE__*/ React.createElement("p", null, "english"));
+      };
+      "
+    `)
+  })
 });
